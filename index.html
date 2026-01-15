@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Parking Julius 2.0</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --danger: #f43f5e; --success: #22c55e; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: white; text-align: center; margin: 0; padding: 20px; }
+        .container { max-width: 400px; margin: auto; background: var(--card); padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #map { height: 250px; border-radius: 15px; margin: 15px 0; border: 1px solid #334155; }
+        input { background: #0f172a; border: 1px solid #334155; color: white; padding: 12px; border-radius: 10px; width: 60px; font-size: 1.2rem; text-align: center; }
+        button { width: 100%; padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; margin: 10px 0; font-size: 1rem; transition: 0.2s; }
+        .btn-go { background: var(--success); color: white; }
+        .btn-nav { background: var(--accent); color: white; }
+        #timer { font-size: 2rem; font-weight: bold; color: var(--danger); margin: 15px 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚗 Parking Pro 2.0</h2>
+    
+    <label>Minutos de parquímetro:</label><br>
+    <input type="number" id="mins" value="60">
+    
+    <button class="btn-go" onclick="iniciar()">📍 GUARDAR Y ACTIVAR</button>
+    
+    <div id="timer">00:00</div>
+    <div id="map"></div>
+    
+    <button class="btn-nav" onclick="navegar()">🧭 REGRESAR AL AUTO</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map, marker, countdown;
+
+    // 1. Registrar Service Worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+    }
+
+    function iniciar() {
+        if (!navigator.geolocation) return alert("Activa el GPS");
+        
+        Notification.requestPermission();
+
+        navigator.geolocation.getCurrentPosition(pos => {
+            const { latitude: lat, longitude: lng } = pos.coords;
+            const mins = parseInt(document.getElementById('mins').value);
+            const fin = Date.now() + (mins * 60000);
+
+            // Guardar datos
+            localStorage.setItem('p_fin', fin);
+            localStorage.setItem('p_lat', lat);
+            localStorage.setItem('p_lng', lng);
+
+            // Mapa
+            if (!map) {
+                map = L.map('map').setView([lat, lng], 17);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            }
+            if (marker) map.removeLayer(marker);
+            marker = L.marker([lat, lng]).addTo(map);
+
+            // ENVIAR ALARMA AL TRABAJADOR DE FONDO
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'SET_TIMER',
+                    ms: mins * 60000
+                });
+            }
+
+            alert("✅ ¡Ubicación guardada! La alarma sonará aunque cierres la app.");
+            reproducirContador();
+        });
+    }
+
+    function reproducirContador() {
+        if (countdown) clearInterval(countdown);
+        countdown = setInterval(() => {
+            const fin = localStorage.getItem('p_fin');
+            const resto = fin - Date.now();
+            if (resto <= 0) {
+                document.getElementById('timer').innerText = "¡TIEMPO!";
+                clearInterval(countdown);
+                return;
+            }
+            const m = Math.floor(resto / 60000);
+            const s = Math.floor((resto % 60000) / 1000);
+            document.getElementById('timer').innerText = `${m}:${s.toString().padStart(2,'0')}`;
+        }, 1000);
+    }
+
+    function navegar() {
+        const lat = localStorage.getItem('p_lat');
+        const lng = localStorage.getItem('p_lng');
+        if (lat) window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`);
+    }
+
+    window.onload = () => { if (localStorage.getItem('p_fin')) reproducirContador(); };
+</script>
+</body>
+</html>
