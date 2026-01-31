@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Parking Julius 2.0</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --danger: #f43f5e; --success: #22c55e; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: white; text-align: center; margin: 0; padding: 20px; }
+        .container { max-width: 400px; margin: auto; background: var(--card); padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #334155; }
+        #map { height: 250px; border-radius: 15px; margin: 15px 0; border: 1px solid #334155; }
+        input { background: #0f172a; border: 1px solid #334155; color: white; padding: 12px; border-radius: 10px; width: 60px; font-size: 1.2rem; text-align: center; }
+        button { width: 100%; padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; margin: 10px 0; font-size: 1rem; transition: 0.2s; }
+        .btn-go { background: var(--success); color: white; }
+        .btn-nav { background: var(--accent); color: white; }
+        #timer { font-size: 2.5rem; font-weight: bold; color: var(--danger); margin: 15px 0; text-shadow: 0 0 10px rgba(244, 63, 94, 0.3); }
+        .status-msg { color: #94a3b8; font-size: 0.8rem; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚗 Parking Pro 2.0</h2>
+    
+    <label>Minutos de parquímetro:</label><br>
+    <input type="number" id="mins" value="60">
+    
+    <button class="btn-go" onclick="iniciar()">📍 GUARDAR Y ACTIVAR</button>
+    
+    <div id="timer">00:00</div>
+    <div id="map"></div>
+    
+    <button class="btn-nav" onclick="navegar()">🧭 REGRESAR AL AUTO</button>
+    <div id="status" class="status-msg">Esperando comando...</div>
+</div>
+
+<audio id="audioAlarma" loop>
+    <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+</audio>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map, marker, countdown;
+    const audio = document.getElementById('audioAlarma');
+
+    // Registro del Service Worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').then(reg => {
+            console.log("SW registrado");
+        });
+    }
+
+    async function iniciar() {
+        if (!navigator.geolocation) return alert("Activa el GPS");
+        
+        // Solicitar permisos de notificación
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+            alert("¡Atención! Debes permitir las notificaciones para que la alarma funcione fuera de la app.");
+        }
+
+        navigator.geolocation.getCurrentPosition(pos => {
+            const { latitude: lat, longitude: lng } = pos.coords;
+            const mins = parseInt(document.getElementById('mins').value);
+            const msTotales = mins * 60000;
+            const fin = Date.now() + msTotales;
+
+            // Guardar datos localmente
+            localStorage.setItem('p_fin', fin);
+            localStorage.setItem('p_lat', lat);
+            localStorage.setItem('p_lng', lng);
+
+            // Actualizar Mapa
+            if (!map) {
+                map = L.map('map').setView([lat, lng], 17);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            }
+            if (marker) map.removeLayer(marker);
+            marker = L.marker([lat, lng]).addTo(map);
+            map.panTo([lat, lng]);
+
+            // ENVIAR ORDEN AL SERVICE WORKER (PARA EL FONDO)
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'SET_TIMER',
+                    ms: msTotales
+                });
+                document.getElementById('status').innerText = "✅ Alarma de fondo programada";
+            }
+
+            // Notificación inmediata de confirmación
+            new Notification("🅿️ Parking Julius", { 
+                body: `Cronómetro iniciado: ${mins} min.`,
+                silent: true 
+            });
+
+            // Preparar el audio (el navegador requiere un clic para permitir sonido)
+            audio.play().then(() => {
+                audio.pause();
+                audio.currentTime = 0;
+            }).catch(() => {});
+
+            reproducirContador();
+        });
+    }
+
+    function reproducirContador() {
+        if (countdown) clearInterval(countdown);
+        countdown = setInterval(() => {
+            const fin = localStorage.getItem('p_fin');
+            const resto = fin - Date.now();
+            
+            if (resto <= 0) {
+                document.getElementById('timer').innerText = "¡TIEMPO!";
+                if (audio.paused) audio.play();
+                clearInterval(countdown);
+                return;
+            }
+            
+            const m = Math.floor(resto / 60000);
+            const s = Math.floor((resto % 60000) / 1000);
+            document.getElementById('timer').innerText = `${m}:${s.toString().padStart(2,'0')}`;
+        }, 1000);
+    }
+
+    function navegar() {
+        const lat = localStorage.getItem('p_lat');
+        const lng = localStorage.getItem('p_lng');
+        if (lat) {
+            audio.pause(); // Detener alarma si está sonando al iniciar navegación
+            window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`);
+        }
+    }
+
+    window.onload = () => { if (localStorage.getItem('p_fin')) reproducirContador(); };
+</script>
+</body>
+</html>
