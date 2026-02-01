@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Parking Julius 2.0</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --danger: #f43f5e; --success: #22c55e; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: white; text-align: center; margin: 0; padding: 20px; }
+        .container { max-width: 400px; margin: auto; background: var(--card); padding: 20px; border-radius: 20px; border: 1px solid #334155; }
+        #map { height: 250px; border-radius: 15px; margin: 15px 0; border: 1px solid #334155; }
+        input { background: #0f172a; border: 1px solid #334155; color: white; padding: 12px; border-radius: 10px; width: 80px; font-size: 1.2rem; text-align: center; }
+        button { width: 100%; padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; margin: 8px 0; font-size: 1rem; }
+        .btn-go { background: var(--success); color: white; }
+        .btn-stop { background: var(--danger); color: white; display: none; }
+        #timer { font-size: 2.5rem; font-weight: bold; color: var(--danger); margin: 15px 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚗 Parking Pro 2.0</h2>
+    <label>Minutos:</label><br>
+    <input type="number" id="mins" value="6">
+    
+    <button id="btnIniciar" class="btn-go" onclick="iniciar()">📍 GUARDAR Y ACTIVAR</button>
+    <button id="btnDetener" class="btn-stop" onclick="detenerTodo()">🔕 DETENER ALARMA</button>
+    
+    <div id="timer">00:00</div>
+    <div id="map"></div>
+    <button style="background:var(--accent);color:white" onclick="navegar()">🧭 REGRESAR AL AUTO</button>
+</div>
+
+<audio id="audioAlarma" loop><source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"></audio>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map, marker, countdown;
+    const audio = document.getElementById('audioAlarma');
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+    }
+
+    async function iniciar() {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') return alert("Permite notificaciones");
+
+        navigator.geolocation.getCurrentPosition(pos => {
+            const mins = parseInt(document.getElementById('mins').value);
+            const ms = mins * 60000;
+            const fin = Date.now() + ms;
+
+            localStorage.setItem('p_fin', fin);
+            localStorage.setItem('p_lat', pos.coords.latitude);
+            localStorage.setItem('p_lng', pos.coords.longitude);
+
+            if (!map) {
+                map = L.map('map').setView([pos.coords.latitude, pos.coords.longitude], 17);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            }
+            if (marker) map.removeLayer(marker);
+            marker = L.marker([pos.coords.latitude, pos.coords.longitude]).addTo(map);
+
+            // ENVIAR AL FONDO
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'PROGRAMAR_ALERTAS', msTotales: ms });
+            }
+
+            // Desbloquear audio
+            audio.play().then(() => { audio.pause(); audio.currentTime = 0; });
+            
+            document.getElementById('btnIniciar').style.display = 'none';
+            document.getElementById('btnDetener').style.display = 'block';
+
+            reproducirContador();
+        });
+    }
+
+    function reproducirContador() {
+        if (countdown) clearInterval(countdown);
+        countdown = setInterval(() => {
+            const resto = localStorage.getItem('p_fin') - Date.now();
+            if (resto <= 0) {
+                document.getElementById('timer').innerText = "¡TIEMPO!";
+                audio.play();
+                clearInterval(countdown);
+                return;
+            }
+            const m = Math.floor(resto / 60000);
+            const s = Math.floor((resto % 60000) / 1000);
+            document.getElementById('timer').innerText = ${m}:${s.toString().padStart(2,'0')};
+            
+            // Si faltan exactamente 5 minutos y la app está abierta, sonar levemente
+            if (m === 5 && s === 0) {
+                new Notification("⚠️ ¡5 MINUTOS!");
+            }
+        }, 1000);
+    }
+
+    function detenerTodo() {
+        audio.pause();
+        audio.currentTime = 0;
+        clearInterval(countdown);
+        localStorage.removeItem('p_fin');
+        document.getElementById('timer').innerText = "00:00";
+        document.getElementById('btnIniciar').style.display = 'block';
+        document.getElementById('btnDetener').style.display = 'none';
+    }
+
+    function navegar() {
+        const lat = localStorage.getItem('p_lat');
+        const lng = localStorage.getItem('p_lng');
+        if (lat) window.open(https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking);
+    }
+
+    window.onload = () => { if (localStorage.getItem('p_fin')) { reproducirContador(); document.getElementById('btnIniciar').style.display = 'none'; document.getElementById('btnDetener').style.display = 'block'; } };
+</script>
+</body>
+</html>
