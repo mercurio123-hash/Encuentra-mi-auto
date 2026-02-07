@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parking Master Pro v4</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #000; color: #fff; margin: 0; padding: 15px; }
+        .card { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; max-width: 500px; margin: auto; }
+        #map { height: 250px; width: 100%; border-radius: 12px; margin: 15px 0; }
+        .status-box { background: #333; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+        .timer-display { font-size: 2rem; font-weight: bold; color: #00ff00; margin: 10px 0; }
+        .alert-text { color: #ffeb3b; font-weight: bold; margin-bottom: 10px; display: block; }
+        input { padding: 12px; width: 80px; border-radius: 8px; border: none; background: #444; color: #fff; font-size: 1.2rem; text-align: center; }
+        button { padding: 18px; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; width: 100%; font-size: 1.1rem; margin: 5px 0; }
+        .btn-green { background: #2e7d32; color: #fff; }
+        .btn-blue { background: #1565c0; color: #fff; }
+        .btn-red { background: #c62828; color: #fff; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2 style="margin-top:0">🚗 Parking Pro</h2>
+    
+    <div class="status-box">
+        <label>Tiempo total del parquímetro (min):</label><br>
+        <input type="number" id="inputMins" value="60">
+        <div id="statusLabel" style="margin-top:10px; font-size: 0.9rem;">Pulsa el botón al estacionar</div>
+        <div class="timer-display" id="cuentaRegresiva">--:--</div>
+        <span id="labelRestante" style="font-size: 0.8rem; color: #aaa;">TIEMPO RESTANTE</span>
+    </div>
+
+    <button class="btn-green" onclick="iniciarServicio()">📍 GUARDAR LUGAR Y RELOJ</button>
+    <button id="btnStop" class="btn-red" onclick="detenerTodo()">🔕 DETENER ALARMA</button>
+
+    <div id="map"></div>
+    
+    <button class="btn-blue" onclick="navegarAlAuto()">🧭 CÓMO LLEGAR AL AUTO</button>
+</div>
+
+<audio id="audioAlarma" loop>
+    <source src="https://assets.mixkit.co/active_storage/sfx/1006/1006-preview.mp3" type="audio/mpeg">
+</audio>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map, marker, swReg, interval;
+    let endTime, carCoords;
+    const audio = document.getElementById('audioAlarma');
+
+    // Registrar Service Worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').then(reg => { swReg = reg; });
+    }
+
+    async function iniciarServicio() {
+        // Pedir permisos de notificación
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') return alert("Necesitas permitir notificaciones para que la alarma funcione.");
+
+        navigator.geolocation.getCurrentPosition(pos => {
+            carCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            const totalMins = parseInt(document.getElementById('inputMins').value);
+            
+            // 1. Configurar Mapa
+            if (!map) {
+                map = L.map('map').setView([carCoords.lat, carCoords.lng], 17);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            }
+            if (marker) map.removeLayer(marker);
+            marker = L.marker([carCoords.lat, carCoords.lng]).addTo(map);
+            map.panTo([carCoords.lat, carCoords.lng]);
+
+            // 2. Calcular tiempos
+            const ahora = new Date();
+            endTime = new Date(ahora.getTime() + totalMins * 60000);
+            const tiempoAlarmaMs = (totalMins - 5) * 60000; // Alarma a los 5 mins antes
+
+            // 3. Programar orden al Service Worker (Blindado)
+            if (swReg && tiempoAlarmaMs > 0) {
+                swReg.active.postMessage({
+                    type: 'PROGRAMAR_ALARMA',
+                    delay: tiempoAlarmaMs,
+                    url: window.location.href
+                });
+            }
+
+            // 4. Iniciar cuenta regresiva visual
+            if (interval) clearInterval(interval);
+            interval = setInterval(actualizarUI, 1000);
+            
+            // "Despertar" audio
+            audio.play().then(() => audio.pause());
+
+            document.getElementById('statusLabel').innerText = "✅ Ubicación y Alarma guardadas";
+            alert("App programada. Puedes cerrar o usar otras apps.");
+        }, null, { enableHighAccuracy: true });
+    }
+
+    function actualizarUI() {
+        const ahora = new Date();
+        const dif = endTime - ahora;
+
+        if (dif <= 0) {
+            document.getElementById('cuentaRegresiva').innerText = "00:00";
+            document.getElementById('cuentaRegresiva').style.color = "red";
+            clearInterval(interval);
+            return;
+        }
+
+        const m = Math.floor(dif / 60000);
+        const s = Math.floor((dif % 60000) / 1000);
+        document.getElementById('cuentaRegresiva').innerText = 
+            `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+
+        // Activar alarma sonora local si la app está abierta
+        if (m === 5 && s === 0) {
+            sonarAlarmaLocal();
+        }
+    }
+
+    function sonarAlarmaLocal() {
+        audio.play();
+        document.getElementById('btnStop').style.display = 'block';
+        if ("vibrate" in navigator) navigator.vibrate([1000, 500, 1000]);
+    }
+
+    function detenerTodo() {
+        audio.pause();
+        audio.currentTime = 0;
+        document.getElementById('btnStop').style.display = 'none';
+    }
+
+    function navegarAlAuto() {
+        if (!carCoords) return alert("No hay ubicación guardada");
+        window.open(`https://www.google.com/maps/dir/?api=1&destination=${carCoords.lat},${carCoords.lng}&travelmode=walking`);
+    }
+</script>
+</body>
+</html>
