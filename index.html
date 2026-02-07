@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parking Master Pro - Android</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #121212; color: #e0e0e0; margin: 0; padding: 20px; }
+        .card { background: #1e1e1e; padding: 20px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width: 500px; margin: auto; border: 1px solid #333; }
+        #map { height: 300px; width: 100%; border-radius: 10px; margin: 15px 0; border: 1px solid #444; }
+        .timer-box { font-size: 1.3rem; font-weight: bold; color: #ff5252; margin: 10px 0; }
+        input { padding: 12px; width: 80px; border-radius: 8px; border: 1px solid #444; background: #2c2c2c; color: white; text-align: center; font-size: 1rem; }
+        button { padding: 15px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; margin: 8px 0; font-size: 1rem; }
+        .btn-save { background-color: #00c853; color: white; }
+        .btn-nav { background-color: #2979ff; color: white; }
+        .btn-stop { background-color: #ff1744; color: white; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>🚗 Parking Master Pro</h2>
+    <button class="btn-save" onclick="iniciarEstacionamiento()">📍 Guardar Ubicación y Tiempo</button>
+    <div style="margin: 15px 0;">
+        <label>Minutos parquímetro:</label><br>
+        <input type="number" id="inputParquimetro" value="60">
+    </div>
+    <div class="timer-box" id="displayTiempo">Reloj listo</div>
+    <div id="displayAlarma" style="color: #ffab40; font-weight: bold;"></div>
+    <button id="btnDetener" class="btn-stop" onclick="detenerAlarma()">🔕 DETENER ALARMA</button>
+    <div id="map"></div>
+    <button class="btn-nav" onclick="irAlAuto()">🧭 ¿Cómo llegar al auto?</button>
+</div>
+
+<audio id="audioAlarma" loop><source src="https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3" type="audio/mpeg"></audio>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map, marker, startTime, interval, swReg;
+    let carCoords = null;
+    let alarmaYaSono = false;
+
+    // Registrar Service Worker para Android
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').then(reg => {
+            swReg = reg;
+            console.log("Service Worker Activo");
+        });
+    }
+
+    // Pedir permiso de notificaciones al inicio
+    function pedirPermiso() {
+        if ('Notification' in window) {
+            Notification.requestPermission();
+        }
+    }
+
+    function iniciarEstacionamiento() {
+        pedirPermiso();
+        navigator.geolocation.getCurrentPosition(pos => {
+            carCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            alarmaYaSono = false;
+            
+            if (!map) {
+                map = L.map('map').setView([carCoords.lat, carCoords.lng], 17);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            }
+            if (marker) map.removeLayer(marker);
+            marker = L.marker([carCoords.lat, carCoords.lng]).addTo(map);
+            
+            startTime = new Date();
+            if (interval) clearInterval(interval);
+            interval = setInterval(actualizarEstado, 1000);
+            
+            alert("¡Guardado! Android te avisará aunque bloquees el celular.");
+        }, null, { enableHighAccuracy: true });
+    }
+
+    function actualizarEstado() {
+        let ahora = new Date();
+        let transcurrido = Math.floor((ahora - startTime) / 1000);
+        let min = Math.floor(transcurrido / 60);
+        let tiempoTotal = parseInt(document.getElementById('inputParquimetro').value);
+        let tiempoRestante = tiempoTotal - min;
+
+        document.getElementById('displayTiempo').innerText = `Llevas: ${min} min`;
+
+        if (tiempoRestante <= 5 && tiempoRestante >= 0 && !alarmaYaSono) {
+            lanzarAlarma(tiempoRestante);
+        }
+    }
+
+    function lanzarAlarma(minutos) {
+        alarmaYaSono = true;
+        document.getElementById('btnDetener').style.display = 'block';
+        document.getElementById('audioAlarma').play();
+
+        // NOTIFICACIÓN DE SISTEMA (Lo que despierta a Android)
+        if (swReg && Notification.permission === 'granted') {
+            swReg.active.postMessage({
+                type: 'LANZAR_ALARMA',
+                minutos: minutos
+            });
+        }
+    }
+
+    function detenerAlarma() {
+        document.getElementById('audioAlarma').pause();
+        document.getElementById('btnDetener').style.display = 'none';
+        alarmaYaSono = true;
+    }
+
+    function irAlAuto() {
+        if (carCoords) window.open(`https://www.google.com/maps/dir/?api=1&destination=${carCoords.lat},${carCoords.lng}&travelmode=walking`);
+    }
+</script>
+</body>
+</html>
