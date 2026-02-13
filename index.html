@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Parking Julius 2.0</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --danger: #f43f5e; --success: #22c55e; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: white; text-align: center; margin: 0; padding: 15px; }
+        .container { max-width: 400px; margin: auto; background: var(--card); padding: 20px; border-radius: 20px; border: 1px solid #334155; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        #map { height: 250px; border-radius: 15px; margin: 15px 0; border: 1px solid #334155; }
+        input { background: #0f172a; border: 1px solid #334155; color: white; padding: 12px; border-radius: 10px; width: 80px; font-size: 1.2rem; text-align: center; }
+        button { width: 100%; padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; margin: 8px 0; font-size: 1rem; }
+        .btn-go { background: var(--success); color: white; }
+        .btn-stop { background: var(--danger); color: white; }
+        #timer { font-size: 3rem; font-weight: bold; color: var(--accent); margin: 10px 0; }
+        .nav-link { background: var(--accent); color: white; text-decoration: none; display: block; padding: 15px; border-radius: 12px; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚗 Parking Pro 2.0</h2>
+    
+    <div id="setup">
+        <label>Minutos totales:</label><br>
+        <input type="number" id="mins" value="60">
+        <button class="btn-go" onclick="iniciar()">📍 GUARDAR Y AVISAR</button>
+    </div>
+    
+    <div id="active-ui" style="display:none">
+        <div id="timer">00:00</div>
+        <button class="btn-stop" onclick="detenerTodo()">🔕 LIMPIAR PARQUÍMETRO</button>
+    </div>
+
+    <div id="map"></div>
+    <button class="nav-link" onclick="navegar()">🧭 REGRESAR AL AUTO</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map, marker, countdown;
+
+    async function iniciar() {
+        navigator.geolocation.getCurrentPosition(pos => {
+            const mins = parseInt(document.getElementById('mins').value);
+            const ahora = new Date();
+            const horaAlarma = new Date(ahora.getTime() + (mins * 60000));
+            
+            // 1. Guardar datos
+            localStorage.setItem('p_fin', horaAlarma.getTime());
+            localStorage.setItem('p_lat', pos.coords.latitude);
+            localStorage.setItem('p_lng', pos.coords.longitude);
+
+            // 2. Interfaz
+            document.getElementById('setup').style.display = 'none';
+            document.getElementById('active-ui').style.display = 'block';
+            mostrarMapa(pos.coords.latitude, pos.coords.longitude);
+            reproducirContador();
+
+            // 3. EL TRUCO: Formatear hora y avisar al sistema
+            const h = horaAlarma.getHours().toString().padStart(2, '0');
+            const m = horaAlarma.getMinutes().toString().padStart(2, '0');
+
+            alert(`📍 Ubicación guardada.\n⏰ Pon tu alarma a las ${h}:${m}.\n\nSe intentará abrir tu reloj ahora.`);
+            
+            // Intentar saltar a la app de reloj de Android
+            window.location.href = "intent://com.android.deskclock/#Intent;scheme=android-app;end";
+        });
+    }
+
+    function reproducirContador() {
+        if (countdown) clearInterval(countdown);
+        countdown = setInterval(() => {
+            const resto = localStorage.getItem('p_fin') - Date.now();
+            if (resto <= 0) {
+                document.getElementById('timer').innerText = "¡TIEMPO!";
+                clearInterval(countdown);
+                return;
+            }
+            const m = Math.floor(resto / 60000);
+            const s = Math.floor((resto % 60000) / 1000);
+            document.getElementById('timer').innerText = `${m}:${s.toString().padStart(2,'0')}`;
+        }, 1000);
+    }
+
+    function detenerTodo() {
+        clearInterval(countdown);
+        localStorage.removeItem('p_fin');
+        document.getElementById('setup').style.display = 'block';
+        document.getElementById('active-ui').style.display = 'none';
+    }
+
+    function mostrarMapa(lat, lng) {
+        if (!map) {
+            map = L.map('map').setView([lat, lng], 17);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        }
+        if (marker) map.removeLayer(marker);
+        marker = L.marker([lat, lng]).addTo(map);
+        map.panTo([lat, lng]);
+    }
+
+    function navegar() {
+        const lat = localStorage.getItem('p_lat');
+        const lng = localStorage.getItem('p_lng');
+        if (lat) window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`);
+    }
+
+    window.onload = () => {
+        const fin = localStorage.getItem('p_fin');
+        if (fin && fin > Date.now()) {
+            document.getElementById('setup').style.display = 'none';
+            document.getElementById('active-ui').style.display = 'block';
+            reproducirContador();
+            mostrarMapa(localStorage.getItem('p_lat'), localStorage.getItem('p_lng'));
+        }
+    };
+</script>
+</body>
+</html>
